@@ -1,0 +1,344 @@
+---
+title: "ABJ-4011 PROJECT"
+name: ODITA SAMUEL
+date: "2023-12-30"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+install.packages("RMySQL")
+library(RMySQL)
+```
+
+```{r}
+#TASK 1
+USER <- 'root'
+PASSWORD <- 'sensei@30'
+HOST <- 'localhost'
+DBNAME <- 'world'
+
+db <- dbConnect(MySQL(), user = USER, password = PASSWORD,
+                host = HOST, dbname = DBNAME, port=3306)
+telcochurn <- dbGetQuery(db, statement = "Select * from world.bangortelco_customers")
+
+dbDisconnect(db)
+
+```
+
+```{r}
+#VIEWING SUMMARY
+head(telcochurn)
+summary(telcochurn)
+```
+
+```{r}
+#checking for missing values
+telcochurn <- na.omit(telcochurn)
+telcochurn <- telcochurn[, colSums(is.na(telcochurn)) == 0]
+```
+
+```{r}
+#loading libraries
+install.packages("gridExtra")
+install.packages("ggthemes")
+install.packages("caret")
+install.packages("randomForest")
+install.packages("party")
+install.packages("glmnet")
+install.packages("factoextra")
+install.packages("pheatmap")
+install.packages("class")
+install.packages("caTools")
+install.packages("rpart.plot")
+library(tidyverse)
+library(tidyr)
+library(rpart)
+library(dplyr)
+library(plyr)
+library(corrplot)
+library(ggplot2)
+library(gridExtra)
+library(ggthemes)
+library(caret)
+library(MASS)
+library(randomForest)
+library(party)
+library(reshape)
+library(reshape2)
+library(pROC)
+library(glmnet)
+library(factoextra)
+library(pheatmap)
+library(class)
+library(caTools)
+library(rpart.plot)
+```
+
+```{r}
+#variables into factors
+telcochurn <- telcochurn %>%
+  mutate(COLLEGE = ifelse(COLLEGE == 'zero', 0, 1),
+         LEAVE = ifelse(LEAVE == 'STAY', 0, 1),
+         REPORTED_SATISFACTION = factor(REPORTED_SATISFACTION),
+         REPORTED_USAGE_LEVEL = factor(REPORTED_USAGE_LEVEL),
+         CONSIDERING_CHANGE_OF_PLAN = factor(CONSIDERING_CHANGE_OF_PLAN))
+  
+```
+
+```{r}
+#Exploratory data analysis and feature selection
+#Correlation between numerical values
+numeric.var <- sapply(telcochurn, is.numeric)
+corr.matrix <- cor(telcochurn[,numeric.var])
+corrplot(corr.matrix, main="\n\nCorrelation Plot for Numerical Variables", method="number")
+```
+
+```{r}
+#setting seed and splitting data
+install.packages("caTools")
+library(caTools)
+treedata <- telcochurn[, -1]
+set.seed(123)
+sample_split <- sample.split(treedata$LEAVE, SplitRatio = 0.70)
+Train <- subset(treedata, sample_split == TRUE)
+Test <- subset(treedata, sample_split == FALSE)
+```
+
+```{r}
+#decision tree
+install.packages("rpart.plot")
+library(rpart.plot)
+decisiontree <- rpart(LEAVE ~ ., data = Train, method = "class", minbucket = 5, maxdepth = 6, cp = 0.001)
+predictions <- predict(decisiontree, Test, type = "class")
+rpart.plot(decisiontree)
+```
+
+```{r}
+#confusion matrix
+confusionmatrix <- table(predictions, Test$LEAVE)
+print(confusionmatrix)
+TP <- confusionmatrix[2, 2]
+FP <- confusionmatrix[2, 1]
+TN <- confusionmatrix[1, 1]
+FN <- confusionmatrix[1, 2]
+accuracy <- (TP +TN)/ sum(confusionmatrix)
+precision <- TP/(TP + FP)
+recall <- TP/(TP + FN)
+f1_score <- 2 * (precision * recall)/ (precision + recall)
+```
+
+```{r}
+#print the metrics result
+print(paste('ACCURACY:', accuracy))
+print(paste('PRECISION:', precision))
+print(paste('RECALL:', recall))
+print(paste('F1SCORE:', f1_score))
+```
+
+```{r}
+  summary(Train)
+Train$CUSTOMERID <- NULL
+telcomodel <- glm(LEAVE ~ COLLEGE + INCOME + OVERAGE + LEFTOVER + HOUSE + HANDSET_PRICE + OVER_15MINS_CALLS_PER_MONTH + AVERAGE_CALL_DURATION + REPORTED_SATISFACTION + REPORTED_USAGE_LEVEL + CONSIDERING_CHANGE_OF_PLAN, 
+                  data = Train,
+                  family = "binomial")
+probabilitytoleave <- predict(telcomodel,
+                              newdata = Train,
+                              type = "response")
+summary(telcomodel)
+```
+
+
+```{r}
+#convert to 0, 1 predictions
+classprediction <- ifelse(probabilitytoleave >= 0.5, 1, 0)
+#table of actual against prediction
+resulttable <- table(classprediction,
+                     Train$LEAVE)
+print(resulttable)
+```
+
+```{r}
+#confusion matrix for logistic regression
+LR_TP <- resulttable[2, 2]
+LR_FP <- resulttable[2, 1]
+LR_TN <- resulttable[1, 1]
+LR_FN <- resulttable[1, 2]
+LR_accuracy <- (LR_TP + LR_TN)/ sum(resulttable)
+LR_precision <- LR_TP/ (LR_TP + LR_FP)
+LR_recall <- LR_TP/ (LR_TP + LR_FN)
+LR_f1score <- 2 * (LR_precision * LR_recall)/ (LR_precision + LR_recall)
+print(paste('ACCURACY:', LR_accuracy))
+print(paste('PRECISION:', LR_precision))
+print(paste('RECALL:', LR_recall))
+print(paste('F1SCORE:', LR_f1score))
+```
+
+```{r}
+#removing customer ID
+telcochurn$CUSTOMERID <- NULL
+```
+
+```{r}
+#TASK 3
+#BUILDING A K NEAREST NEIGHBOR MODEL
+knndata <- telcochurn
+knndata <- knndata %>% mutate(LEAVE = factor(LEAVE))
+#SCALING DATA
+knndata[,2:8]<-scale(knndata[,2:8])
+#SPLITING DATA
+set.seed(123)
+intrain <- createDataPartition(knndata$LEAVE, p=0.70, list = FALSE)
+knntraindata <- knndata[intrain,] 
+knntestdata <- knndata[-intrain,] 
+?knn
+grid_values <- expand.grid(k=seq(1, 25, by = 2))
+
+knnmodel <- train(LEAVE~.,data = knntraindata, method = 'knn',
+                  preProcess = c('center', 'scale'),
+                  trControl = trainControl(method = 'repeatedcv', number = 10, repeats = 5), tuneGrid = grid_values)
+knnmodel
+#PLOTTING THE MODEL
+knnresult <- knnmodel$results
+knnresult |> ggplot(aes(x = k, y = accuracy)) + geom_point() + geom_line()
+plot(knnmodel)
+confusionMatrix(knnmodel)
+```
+
+```{r}
+#PREDICTION FOR TEST DATA
+knnpredictions <- predict(knnmodel, newdata = knntestdata)
+#CONFUSION MATRIX
+knnconfusionmatrix <- confusionMatrix(data = knnpredictions, reference = knntestdata$LEAVE)
+#EXTRACTING METRICS
+knnaccuracy <- knnconfusionmatrix$overall['Accuracy']
+knnprecision <- knnconfusionmatrix$byClass['Precision']
+knnrecall <- knnconfusionmatrix$byClass['Recall']
+knnf1score <- knnconfusionmatrix$byClass['F1']
+#PRINTING METRICS
+knnaccuracy
+knnprecision
+knnrecall
+knnf1score
+knnconfusionmatrix
+```
+
+```{r}
+#SPLIT TRAIN AND TEST EQUALLY FOR ROC
+set.seed(123)
+splitindex <- sample(x = c("Train", "Test"), size = nrow(knndata), replace = T, prob = c(0.5, 0.5))
+knntraindata <- filter(knndata, splitindex == "Train")
+knntestdata <- filter(knndata, splitindex == "Test")
+#MODEL ON TRAINING DATA
+set.seed(123)
+knnmodel2 <- train(form = LEAVE ~ .,
+                   data = knntraindata,
+                   method = 'knn')
+#PREDICTED PROBABILITIES
+knnprobability <- predict(object = knnmodel2, newdata = knntestdata, type = "prob")
+knnprobability <- knnprobability[,2]
+#GENERATE THE ROC
+knnROC <- roc(response = knntestdata$LEAVE, predictor = knnprobability)
+plot(knnROC, print.auc = T)
+```
+
+```{r}
+#TASK 4
+#K MEANS CLUSTERING
+set.seed(123)
+sampletelcochurn <- sample_n(tbl = telcochurn, size = 100)
+#HIERARCHICAL CLUSTERING CALCULATION AND PLOT
+telcochurnHCLUST <- hclust(d = dist(x=sampletelcochurn[,1:11]), method = "average")
+plot(x = telcochurnHCLUST, hang = -1, labels=sampletelcochurn$LEAVE)
+```
+
+```{r}
+#COMPUTE DISTANCES IN DATA AND GENERATING HIERARCHICAL CLUSTERS
+telcochurn <- na.omit(telcochurn)
+disttelco <- dist(x = telcochurn[,1:11], method = "euclidean")
+
+# Perform hierarchical clustering
+hctelco <- hclust(d = disttelco, method = "complete")
+
+#DENDOGRAM OBJECT
+telcodendo <- as.dendrogram(hctelco)
+#SAVING THE LEVELS OF THE LEAVE COLUMN
+leavelevel <- rev(levels(telcochurn[,2]))
+#COLOR TO BRANCHES
+install.packages("dendextend")
+library(dendextend)
+telcodendo <- color_branches(dend = telcodendo, k=3)
+#ASSIGN COLORS TO LABELS
+install.packages("colorspace")
+library(colorspace)
+labels_colors(telcodendo) <- 
+  rainbow_hcl(3)[sort_levels_values(
+    as.numeric(telcochurn[.2])[order.dendrogram(telcodendo)]
+  )]
+labels(telcodendo) <- paste(as.character(telcochurn[,5])[order.dendrogram(telcodendo)],
+                            "(", labels(telcodendo), ")",
+                            sep = "")
+telcodendo <- hang.dendrogram(telcodendo, hang_height = 0.1)
+#REDUCE LABEL SIZE
+telcodendo <- set(dend = telcodendo, what = "labels_cex", value = 0.5)
+#PLOTTING OF VISUALS
+par(mar = c(3, 3, 3, 7))
+plot(telcodendo,
+     main = "CLUSTERED TELCO CHURN DATA SET",
+     horiz = TRUE,
+     nodePar = list(cex = .007))
+#CALLING LEGENDS 
+if (length(leavelevel) > 0) {
+  legend("topleft", legend = leavelevel, fill = rainbow_hcl(length(leave)))
+}
+```
+
+```{r}
+install.packages("circlize")
+library(circlize)
+par(mar = rep(1,4))
+circlize_dendrogram(telcodendo)
+```
+
+```{r}
+#IDENTIFY NUMERICAL COLUMNS
+numericalcolumns <- sapply(telcochurn, is.numeric)
+#SCALING NUMERIC COLUMNS
+telcochurn_scaled <- telcochurn
+telcochurn_scaled[, numericalcolumns] <- scale(telcochurn[, numericalcolumns])
+#SETTING NEW DATA SET AND TAKING OUT LEAVE COLUMN
+newtelcochurn <- telcochurn_scaled
+newtelcochurn$LEAVE <- NULL
+#TAKING OUT ROWS WITH MISSING VALUES
+newtelcochurn_no_na <- na.omit(newtelcochurn)
+#COVERTING NON NUMERIC COLUMNS TO NUMERIC
+newtelcochurn_no_na <- as.data.frame(sapply(newtelcochurn_no_na, as.numeric))
+#SPECIFYING FOR K=5 CLUSTERS USING THE KMEANS ALGORITHM
+kmeantelcochurn <- kmeans(x = newtelcochurn_no_na, centers = 5)
+table(LEAVE = telcochurn$LEAVE, Cluster = kmeantelcochurn$cluster)
+#PLOT INCOMING AND AVERAGE CALL DURATION OF THE DATASET
+plot(newtelcochurn_no_na[c("INCOME", "AVERAGE_CALL_DURATION")], col=kmeantelcochurn$cluster)
+points(kmeantelcochurn$centers[,c("INCOME", "AVERAGE_CALL_DURATION")], col=1:3, pch=8, cex=2)
+
+```
+
+```{r}
+#IF WE DONT WANT TO USE TWO OF THE FOUR DIMENSIONS FOR THE PLOT, THEN
+install.packages("cluster")
+library(cluster)
+clusplot(newtelcochurn_no_na, kmeantelcochurn$cluster, color = TRUE)
+clusplot(newtelcochurn_no_na, kmeantelcochurn$cluster, color = TRUE, shade = TRUE, labels = 2, lines = 0)
+```
+
+```{r car
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
